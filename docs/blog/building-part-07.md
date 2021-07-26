@@ -1,4 +1,4 @@
-# LINQ: Building an IQueryable provider – Part VII: Join and SelectMany
+# LINQ: Building an IQueryable provider â€“ Part VII: Join and SelectMany
 
 Matt Warren - MSFT; September 4, 2007
 
@@ -13,7 +13,7 @@ There's been a few weeks hiatus since the last installment. I hope that most of 
 Implementing Join
 
 There are actually a couple different ways to represent a join using LINQ.  In C# or VB if I use more than one 'from' clause I am performing a cross product, and if I match keys from one with keys from the other I am performing a join. 
-
+```csharp
 var query = from c in db.Customers
 
             from o in db.Orders
@@ -21,16 +21,16 @@ var query = from c in db.Customers
             where c.CustomerID == o.CustomerID
 
             select new { c.ContactName, o.OrderDate };
-
+```
 
 Of course, there is also the 'join' clause that is an explicit join.
-
+```csharp
 var query = from c in db.Customers
 
             join o in db.Orders on c.CustomerID equals o.CustomerID
 
             select new { c.ContactName, o.OrderDate };
-
+```
 
 Both of these queries produce the same results.  So why are there two ways to do the same thing?
 
@@ -42,7 +42,7 @@ Also, by not being as expressive the explicit join is much simpler to implement.
 
 
 The definition of the Queryable Join method looks like this:
-
+```csharp
 public static IQueryable<TResult> Join<TOuter,TInner,TKey,TResult>(
     this IQueryable<TOuter> outer, 
     IEnumerable<TInner> inner, 
@@ -50,7 +50,7 @@ public static IQueryable<TResult> Join<TOuter,TInner,TKey,TResult>(
     Expression<Func<TInner,TKey>> innerKeySelector, 
     Expression<Func<TOuter,TInner,TResult>> resultSelector
     )
-
+```
 That's a lot of arguments and a lot of generics!  Fortunately, its not as hard to understand as it looks.  The 'inner' and 'outer' parameters are referring to input sequences (the sequences on both sides of the join); each have their own key selector (the expressions that appear in the 'on' clause on opposite sides of the 'equals'); and finally an expression that is used to produce a result of the join.  This last 'resultSelector' might be a bit confusing since it does not seem to appear in the C# or VB syntax.  In fact, it actually does.  In my example above it is the select expression.  In other examples, not shown here, it might be a compiler generated projection that carries the data forward to the next query operation.
 
 
@@ -58,7 +58,7 @@ Either way, its rather straight forward to implement. In fact, I already have al
 
 
 At least that's easy to remedy.
-
+```csharp
     internal enum DbExpressionType {
 
         Table = 1000, // make sure these don't overlap with ExpressionType
@@ -72,9 +72,9 @@ At least that's easy to remedy.
         Join
 
     }
-
+```
 I modified my enum to make a new 'Join' node type, and then I implement a JoinExpression.
-
+```csharp
     internal enum JoinType {
 
         CrossJoin,
@@ -134,7 +134,7 @@ I modified my enum to make a new 'Join' node type, and then I implement a JoinEx
         }
 
     }
-
+```
 
 I've also defined a JoinType enum and filled it out with all the join types I'll be needing to know about.  'CrossApply' is a SQL Server only join type. Ignore it for now, I don't need it for the equi-join. In fact, I only need the 'InnerJoin'.  The other two come later.  I told you this was the simpler case.
 
@@ -143,7 +143,7 @@ What about outer joins? That will have to be a topic for another post. ??
 
 
 Now, that I have a new JoinExpression I'll need to update my DbExpressionVisitor.
-
+```csharp
     internal class DbExpressionVisitor : ExpressionVisitor {
 
         protected override Expression Visit(Expression exp) {
@@ -181,9 +181,9 @@ Now, that I have a new JoinExpression I'll need to update my DbExpressionVisitor
         }
 
     }
-
+```
 So far so good.  Now, I just update QueryFormatter to know how to produce SQL text out of this new node.
-
+```csharp
     internal class QueryFormatter : DbExpressionVisitor {
         ...
 
@@ -251,13 +251,13 @@ So far so good.  Now, I just update QueryFormatter to know how to produce SQL te
         }
 
     }
-
+```
 
 The idea here is that JoinExpression nodes appear in the same place as other query source expressions such as SelectExpression and TableExpression.  Therefore, I've modified the VisitSource method to know about Joins, and I've added an implementation for VisitJoin.
 
 
 Of couse, I'm not going to get anywhere if I don't know how to turn expression nodes calling the Queryable Join method into my new JoinExpression.  What I need is a method in QueryBinder just like the BindSelect and BindWhere methods.  This turns out to be the meat of the operation, however, it turns out to be rather straight-forward since I already have the support built in to handle the other operators.
-
+```csharp
     internal class QueryBinder : ExpressionVisitor {
         ...
 
@@ -329,7 +329,7 @@ Of couse, I'm not going to get anywhere if I don't know how to turn expression n
         }
 
     }
-
+```
 Inside the BindJoin method It's almost like I'm handling two operators at once. I've got two sources, so I end up with two different source projections.  I use these projections to seed the global map that is used to translate parameter references and then I translate each of the key expressions.  Finally, the same goes for the result expression, except that the result expression can see both source projections instead of just one.
 
 
@@ -340,7 +340,7 @@ That's it. I'm actually done. Join should work as advertised.
 
 
 Let's try it out.
-
+```csharp
 var query = from c in db.Customers
 
             where c.CustomerID == "ALFKI"
@@ -357,12 +357,12 @@ foreach (var item in query) {
     Console.WriteLine(item);
 
 }
-
+```
 
 
 Running this produces the following output:
 
-
+```sql
 SELECT t2.ContactName, t4.OrderDate
 FROM (
   SELECT t1.CustomerID, t1.ContactName, t1.Phone, t1.City, t1.Country
@@ -383,7 +383,7 @@ INNER JOIN (
 { ContactName = Maria Anders, OrderDate = 1/15/1998 12:00:00 AM }
 { ContactName = Maria Anders, OrderDate = 3/16/1998 12:00:00 AM }
 { ContactName = Maria Anders, OrderDate = 4/9/1998 12:00:00 AM }
- 
+``` 
 
 
 Now for the hard stuff. ??
@@ -404,7 +404,7 @@ The problem comes in finding a suitable translation for queries that are specifi
 
 
 If your query looks like this then no problem:
-
+```csharp
 var query = from c in db.Customers
 
             from o in db.Orders
@@ -412,9 +412,9 @@ var query = from c in db.Customers
             where c.CustomerID == o.CustomerID
 
             select new { c.ContactName, o.OrderDate };
-
+```
 This translates into method calls that look like this:
-
+```csharp
 var query = db.Customers
 
               .SelectMany(c => db.Orders, (c, o) => new { c, o })
@@ -422,21 +422,21 @@ var query = db.Customers
               .Where(x => x.c.CustomerID == x.o.CustomerID)
 
               .Select(x => new { x.c.ContactName, x.o.OrderDate });
-
+```
 
 The SelectMany's collection expression 'db.Orders' never references anything from 'c'. This is easy to translate to SQL since we can simply put db.Customers and db.Orders on opposite sides of a join.
 
 
 However, if you simply change how you write the query to this:
-
+```csharp
 var query = from c in db.Customers
 
             from o in db.Orders.Where(o => o.CustomerID == c.CustomerID)
 
             select new { c.ContactName, o.OrderDate };
-
+```
 Now, you've got a very different beast. Translated to method calls this becomes:
-
+```csharp
 var query = db.Customers
 
               .SelectMany(
@@ -446,7 +446,7 @@ var query = db.Customers
                  (c, o) => new { c.ContactName, o.OrderDate }
 
                  );
-
+```
 Now the join condition exists as part of the SelectMany's collection expression, so it references 'c'.  Translation can no longer simply be a process of putting both source expressions on either side of a join in SQL, whether CROSS or INNER.
 
 
@@ -457,7 +457,7 @@ A large part of LINQ to SQL translation engine exists to reduce CROSS APPLY's in
 
 
 So let's take a look at the code.
-
+```csharp
     internal class QueryBinder : ExpressionVisitor {
 
         protected override Expression VisitMethodCall(MethodCallExpression m) {
@@ -564,7 +564,7 @@ So let's take a look at the code.
         ...
 
     }
-
+```
 
 
 The first interesting thing to note is that there are two different forms of SelectMany that are interesting.  The first form takes a source expression and a collectionSelector expression. It produces a sequence of the same elements that are produced in the collectionSelector, only merging all the individual sequences together.  The second form adds the resultSelector expression that lets you project your own result out of the two joined items.  I've implemented BindSelectMany to work with or without the resultSelector being specified.
@@ -580,7 +580,7 @@ All in all, this code is not too different from the BindJoin function or the oth
 
 
 Let's try the new code too.
-
+```csharp
 var query = from c in db.Customers
 
             where c.CustomerID == "ALFKI"
@@ -599,12 +599,12 @@ foreach (var item in query) {
     Console.WriteLine(item);
 
 }
-
+```
 
 
 Running this code now produces the following results:
 
-
+```sql
 SELECT t6.ContactName, t6.OrderDate
 FROM (
   SELECT t5.CustomerID, t5.ContactName, t5.Phone, t5.City, t5.Country, t5.OrderID, t5.CustomerID1, t5.OrderDate
@@ -632,13 +632,13 @@ FROM (
 { ContactName = Maria Anders, OrderDate = 1/15/1998 12:00:00 AM }
 { ContactName = Maria Anders, OrderDate = 3/16/1998 12:00:00 AM }
 { ContactName = Maria Anders, OrderDate = 4/9/1998 12:00:00 AM }
-
+```
 
 Yikes! The queries are starting too look a bit hefty.  I guess that's what happens when I keep mindlessly adding new select layers. Maybe one of these days I'll figure out a way to reduce this to just what is necessary. ??
 
 
 Of course, If I write the query in such a way that it does not pass my simple check I'm going to get a CROSS APPLY.
-
+```csharp
 var query = db.Customers
 
               .Where(c => c.CustomerID == "ALFKI")
@@ -659,12 +659,12 @@ foreach (var item in query) {
     Console.WriteLine(item);
 
 }
-
+```
 
 
 This code produces the following:
 
-
+```sql
 SELECT t2.ContactName, t5.OrderDate
 FROM (
   SELECT t1.CustomerID, t1.ContactName, t1.Phone, t1.City, t1.Country
@@ -689,7 +689,7 @@ CROSS APPLY (
 { ContactName = Maria Anders, OrderDate = 1/15/1998 12:00:00 AM }
 { ContactName = Maria Anders, OrderDate = 3/16/1998 12:00:00 AM }
 { ContactName = Maria Anders, OrderDate = 4/9/1998 12:00:00 AM }
- 
+ ```
 
 
 Exactly what I was expecting! 
