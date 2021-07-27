@@ -1,4 +1,4 @@
-# LINQ: Building an IQueryable Provider – Part V: Improving column binding
+# LINQ: Building an IQueryable Provider â€“ Part V: Improving column binding
 
 Matt Warren - MSFT; August 3, 2007
 
@@ -9,7 +9,7 @@ This is the fifth in a series of posts on how to build a LINQ IQueryable provide
 
 Complete list of posts in the Building an IQueryable Provider series 
 
-Over the past four parts of this series I have constructed a working LINQ IQueryable provider that targets ADO and SQL and has so far been able to translate both Queryable.Where and Queryable.Select standard query operators. Yet, as big of an accomplishment that has been there are still a few gaping holes and I’m not talking about other missing operators like OrderBy and Join. I’m talking about huge conceptual gaffs that will bite anyone that strays from my oh-so-ideally crafted demo queries.
+Over the past four parts of this series I have constructed a working LINQ IQueryable provider that targets ADO and SQL and has so far been able to translate both Queryable.Where and Queryable.Select standard query operators. Yet, as big of an accomplishment that has been there are still a few gaping holes and Iâ€™m not talking about other missing operators like OrderBy and Join. Iâ€™m talking about huge conceptual gaffs that will bite anyone that strays from my oh-so-ideally crafted demo queries.
 
 
 Fixing the Gaping Holes
@@ -17,7 +17,7 @@ Fixing the Gaping Holes
 
 Certainly, I can write a simple where/select pair and it works as advertised.  My select expression can be arbitrarily complex and it still chugs along.
 
-
+```csharp
 var query = db.Customers.Where(c => c.City == city)
 
 
@@ -28,12 +28,12 @@ var query = db.Customers.Where(c => c.City == city)
 
 
                             Location = c.City });
-
+```
 
 
 However, if just rearrange the order of Where and Select it all falls apart.
 
-
+```csharp
 var query = db.Customers.Select(c => new {
 
 
@@ -42,27 +42,27 @@ var query = db.Customers.Select(c => new {
 
                             Location = c.City })
                         .Where(x => x.Location == city);
-
-This handsome little query generates SQL that’s not exactly right.
+```
+This handsome little query generates SQL thatâ€™s not exactly right.
 
 
  
 
-
+```sql
 SELECT * FROM (SELECT ContactName, City FROM (SELECT * FROM Customers) AS T) AS T WHERE (Location = 'London')
-
-It also generates an exception when executed, “Invalid column name 'Location'.”  It seems my oversimplifying practice of treating member accesses as column references has backfired.  I naively assumed that the only member accesses in the sub-trees would match the names of the columns being generated. Yet, that’s obviously not true. So either I need to find a way to change the names of columns to match or I need to figure out some other way to deal with member accesses.
-
-
- 
-
-
-I suppose either is possible.  Yet, if I consider a slightly more complicated example, renaming the columns is not sufficient.  If the select expression produces a hierarchy of objects, then references to members can become a ‘multi-dot’ operation.
+```
+It also generates an exception when executed, â€œInvalid column name 'Location'.â€  It seems my oversimplifying practice of treating member accesses as column references has backfired.  I naively assumed that the only member accesses in the sub-trees would match the names of the columns being generated. Yet, thatâ€™s obviously not true. So either I need to find a way to change the names of columns to match or I need to figure out some other way to deal with member accesses.
 
 
  
 
 
+I suppose either is possible.  Yet, if I consider a slightly more complicated example, renaming the columns is not sufficient.  If the select expression produces a hierarchy of objects, then references to members can become a â€˜multi-dotâ€™ operation.
+
+
+ 
+
+```csharp
 var query = db.Customers.Select(c => new {
 
 
@@ -75,19 +75,19 @@ var query = db.Customers.Select(c => new {
                                 }
                             })
                         .Where(x => x.Location.City == city);
-
-Now, how am I going to translate this? The existing code does not even contain a concept of what this intermediate ‘Location’ object could be.  Luckily, I already realize what I need to do, yet it’s going to require a big change.  I need to step away from this notion that my provider is just translating query expressions into text. It’s translating query expressions into SQL. Text is only one possible manifestation of SQL and it’s not a very good one for programming logic to operate on. Of course, I’m going to need text eventually, but if I could first represent SQL as an abstraction, I could handle much more complicated translations.
-
-
- 
-
-
-Of course, the best data structure to operate on is a semantic SQL tree. So, ideally, I would have this entirely separate tree definition for SQL that I could translate LINQ query expressions into, but that would be a lot of work.  Luckily, the definition of this ideal SQL tree would overlap a lot with LINQ trees, so I’m going to cheat and simply teach LINQ expression trees about SQL. To do this, I’ll add some new expression node types.  It won’t matter if no other LINQ API understands them. I’ll just keep them to myself.
+```
+Now, how am I going to translate this? The existing code does not even contain a concept of what this intermediate â€˜Locationâ€™ object could be.  Luckily, I already realize what I need to do, yet itâ€™s going to require a big change.  I need to step away from this notion that my provider is just translating query expressions into text. Itâ€™s translating query expressions into SQL. Text is only one possible manifestation of SQL and itâ€™s not a very good one for programming logic to operate on. Of course, Iâ€™m going to need text eventually, but if I could first represent SQL as an abstraction, I could handle much more complicated translations.
 
 
  
 
 
+Of course, the best data structure to operate on is a semantic SQL tree. So, ideally, I would have this entirely separate tree definition for SQL that I could translate LINQ query expressions into, but that would be a lot of work.  Luckily, the definition of this ideal SQL tree would overlap a lot with LINQ trees, so Iâ€™m going to cheat and simply teach LINQ expression trees about SQL. To do this, Iâ€™ll add some new expression node types.  It wonâ€™t matter if no other LINQ API understands them. Iâ€™ll just keep them to myself.
+
+
+ 
+
+```csharp
 internal enum DbExpressionType {
 
 
@@ -395,7 +395,7 @@ internal class ProjectionExpression : Expression {
 
 
 }
-
+```
 
  
 
@@ -406,7 +406,7 @@ The only bits of SQL I really need to add to LINQ expression trees are the conce
  
 
 
-I went ahead and defined my own DbExpressionType enum that ‘extends’ the base ExpressionType enum by picking a sufficiently large starting value to not collide with the other definitions.  If there was such a way as to derive from an enum I would have done that, but this will work as long as I am diligent.
+I went ahead and defined my own DbExpressionType enum that â€˜extendsâ€™ the base ExpressionType enum by picking a sufficiently large starting value to not collide with the other definitions.  If there was such a way as to derive from an enum I would have done that, but this will work as long as I am diligent.
 
 
  
@@ -418,18 +418,18 @@ Each of the new expression nodes follows the same pattern set by the LINQ expres
  
 
 
-The ProjectionExpression describes how to construct a result object out of the columns of a select expression.  If you think about it, this is almost exactly the same job that the projection expression held in Part IV, the one that was used to build the delegate for the ProjectionReader. Only this time, it’s possible to reason about projection in terms of the SQL query and not just as a function that assembles objects out of DataReaders.
+The ProjectionExpression describes how to construct a result object out of the columns of a select expression.  If you think about it, this is almost exactly the same job that the projection expression held in Part IV, the one that was used to build the delegate for the ProjectionReader. Only this time, itâ€™s possible to reason about projection in terms of the SQL query and not just as a function that assembles objects out of DataReaders.
 
 
  
 
 
-Of course, now that I’ve got new nodes, I need a new visitor. The DbExpressionVisitor extends the ExpressionVisitor, adding the base visit pattern for the new nodes.
+Of course, now that Iâ€™ve got new nodes, I need a new visitor. The DbExpressionVisitor extends the ExpressionVisitor, adding the base visit pattern for the new nodes.
 
 
  
 
-
+```csharp
 internal class DbExpressionVisitor : ExpressionVisitor {
 
 
@@ -614,27 +614,27 @@ internal class DbExpressionVisitor : ExpressionVisitor {
 
 
 }
+```
 
 
-
-That’s better.  Now I feel like I’m really headed somewhere!
-
-
- 
-
-
-The next step is to take a stick of dynamite and blow up the QueryTranslator. No more monolithic expression tree to string translator.  What I need are individual pieces that handle separate tasks;  one to bind the expression tree by figuring out what methods like Queryable.Select mean and another to convert the resulting tree into SQL text.  Hopefully, by concocting this LINQ/SQL hybrid tree I’ll be able to figure out the member access mess.
+Thatâ€™s better.  Now I feel like Iâ€™m really headed somewhere!
 
 
  
 
 
-Here’s the code for the new QueryBinder class.
+The next step is to take a stick of dynamite and blow up the QueryTranslator. No more monolithic expression tree to string translator.  What I need are individual pieces that handle separate tasks;  one to bind the expression tree by figuring out what methods like Queryable.Select mean and another to convert the resulting tree into SQL text.  Hopefully, by concocting this LINQ/SQL hybrid tree Iâ€™ll be able to figure out the member access mess.
 
 
  
 
 
+Hereâ€™s the code for the new QueryBinder class.
+
+
+ 
+
+```csharp
 internal class QueryBinder : ExpressionVisitor {
 
 
@@ -1242,16 +1242,16 @@ internal class QueryBinder : ExpressionVisitor {
 
 
 }
+```
 
 
-
-One thing to notice is that there is a lot more going on here than in the QueryTranslator of yore. Translation for Where and Select have been factored out into separate methods.  They don’t produce text anymore, but instances of ProjectionExpression and SelectExpression.  The ColumnProjector looks like it is doing something much more complicated too.  I haven’t shown the code for that yet, but it has changed as well.  There’s all these little helper methods for understanding the meaning of a table or a column.  This is the starting of a factoring that may well end with some kind of mapping system, but I’ll leave that for the future.
+One thing to notice is that there is a lot more going on here than in the QueryTranslator of yore. Translation for Where and Select have been factored out into separate methods.  They donâ€™t produce text anymore, but instances of ProjectionExpression and SelectExpression.  The ColumnProjector looks like it is doing something much more complicated too.  I havenâ€™t shown the code for that yet, but it has changed as well.  Thereâ€™s all these little helper methods for understanding the meaning of a table or a column.  This is the starting of a factoring that may well end with some kind of mapping system, but Iâ€™ll leave that for the future.
 
 
  
 
 
-A key method to examine is the GetTableProjection method that actually assembles a query (with both Select and Project expressions) that represent the default query for getting members out of the database table. No more “select *” here.  The default table projection only represents the columns that I defined in my domain class declarations.
+A key method to examine is the GetTableProjection method that actually assembles a query (with both Select and Project expressions) that represent the default query for getting members out of the database table. No more â€œselect *â€ here.  The default table projection only represents the columns that I defined in my domain class declarations.
 
 
  
@@ -1263,18 +1263,18 @@ Another thing to note is the change in the VisitMemberAccess method.  I no longe
  
 
 
-This is how it works. When I translate a ‘table’ constant into a table projection (via GetTableProjection), I include a projector expression that describes how to construct an object out of the table’s columns.  When I get to a Select or Where method I add a mapping from the parameter expression declared by the LambdaExpression argument to the projector of the ‘previous’ portion of the query.  For the first Where or Select that’s just the projector from the table projection.  So, later when I see a parameter expression in VisitParameter I substitute the entire previous projector expression.  It’s okay to do this, the nodes are immutable and so I can include them many times in the tree.  Finally, when I get to the member access node I’ve already turned the parameter into its semantic equivalent. This expression is likely a new or member-init expression node, and so I merely do a lookup in this structure to find the expression that the member access should be replaced with.  Often, this simply finds a ColumnExpression node defined by the table projection.  It could, however, find another new or member-init expression from a previous Select operation that produced a hierarchy.  If it did, then a subsequent member access operation would look inside this expression, and so on.
+This is how it works. When I translate a â€˜tableâ€™ constant into a table projection (via GetTableProjection), I include a projector expression that describes how to construct an object out of the tableâ€™s columns.  When I get to a Select or Where method I add a mapping from the parameter expression declared by the LambdaExpression argument to the projector of the â€˜previousâ€™ portion of the query.  For the first Where or Select thatâ€™s just the projector from the table projection.  So, later when I see a parameter expression in VisitParameter I substitute the entire previous projector expression.  Itâ€™s okay to do this, the nodes are immutable and so I can include them many times in the tree.  Finally, when I get to the member access node Iâ€™ve already turned the parameter into its semantic equivalent. This expression is likely a new or member-init expression node, and so I merely do a lookup in this structure to find the expression that the member access should be replaced with.  Often, this simply finds a ColumnExpression node defined by the table projection.  It could, however, find another new or member-init expression from a previous Select operation that produced a hierarchy.  If it did, then a subsequent member access operation would look inside this expression, and so on.
 
 
  
 
 
-Whew!  That’s a lot to take in.  Unfortunately, I am not done. There’s also this ColumnProjector class that is a whole lot different than before.  Take a look.
+Whew!  Thatâ€™s a lot to take in.  Unfortunately, I am not done. Thereâ€™s also this ColumnProjector class that is a whole lot different than before.  Take a look.
 
 
  
 
-
+```csharp
     internal sealed class ProjectedColumns {
 
 
@@ -1642,26 +1642,26 @@ Whew!  That’s a lot to take in.  Unfortunately, I am not done. There’s also this
 
 
     }
-
+```
 The ColumnProjector is no longer assembling text for the select command, nor is it rewriting the selector expression into a function that constructs an object from a DataReader.  However, it is doing something that is almost the same thing.  It is assembling a list of ColumnDeclaration objects that are going to be used to construct a SelectExpression node, and it is rewriting the selector expression into a projector expression that references the columns assembled in the list.
 
 
  
 
 
-So how does it work?  I’ve probably over engineered this class for what I’m using it for right now, but it will come in handy in the future so I’ll leave it as is.  Before I get into how it works, let’s think about what it needs to do.
+So how does it work?  Iâ€™ve probably over engineered this class for what Iâ€™m using it for right now, but it will come in handy in the future so Iâ€™ll leave it as is.  Before I get into how it works, letâ€™s think about what it needs to do.
 
 
  
 
 
-Given some selector expression, I really need to figure out which parts of the expression should correspond to column declarations of a SQL select statement.  These could be as simple as identifying the column references (ColumnExpression’s) left over in the tree after binding.  Of course, that would mean the expression ‘a + b’ would turn into two column declarations, one for ‘a’ and one for ‘b’, leaving the ‘+’ operation residing in the newly rebuilt projector expression.  That would certainly work, but wouldn’t it make sense to be able to put the entire ‘a + b’ expression into the column?  That way it would be computed by SQL server instead of during construction of the results.  If a Where operation, appearing after the Select operation, were to reference this expression it would have to evaluate it on the server anyway. Ignoring for the moment that I have not even allowed for ‘+’ operations to be translated, you can start to see that the problem of figuring out what should be in a column and what should be in the projection is a problem akin to the problem of figuring out how to pre-evaluate isolated sub-trees.
+Given some selector expression, I really need to figure out which parts of the expression should correspond to column declarations of a SQL select statement.  These could be as simple as identifying the column references (ColumnExpressionâ€™s) left over in the tree after binding.  Of course, that would mean the expression â€˜a + bâ€™ would turn into two column declarations, one for â€˜aâ€™ and one for â€˜bâ€™, leaving the â€˜+â€™ operation residing in the newly rebuilt projector expression.  That would certainly work, but wouldnâ€™t it make sense to be able to put the entire â€˜a + bâ€™ expression into the column?  That way it would be computed by SQL server instead of during construction of the results.  If a Where operation, appearing after the Select operation, were to reference this expression it would have to evaluate it on the server anyway. Ignoring for the moment that I have not even allowed for â€˜+â€™ operations to be translated, you can start to see that the problem of figuring out what should be in a column and what should be in the projection is a problem akin to the problem of figuring out how to pre-evaluate isolated sub-trees.
 
 
  
 
 
-The Evaluator class did this work using a two pass system of first nominating nodes that could be evaluated locally and then a second pass to pick the first nominated nodes from the top down, thus achieving evaluation of ‘maximal’ sub-trees.  Figuring out what could or should be in a column declaration is just same kind of problem, only with a possibly different rule about what should be included or not.  I want to pluck off the maximal sub-trees of nodes that can legally be placed in columns.  Instead of evaluating these trees I just want to make them part of a SelectExpression and rewrite the remaining selector tree into a projector that references the new columns.
+The Evaluator class did this work using a two pass system of first nominating nodes that could be evaluated locally and then a second pass to pick the first nominated nodes from the top down, thus achieving evaluation of â€˜maximalâ€™ sub-trees.  Figuring out what could or should be in a column declaration is just same kind of problem, only with a possibly different rule about what should be included or not.  I want to pluck off the maximal sub-trees of nodes that can legally be placed in columns.  Instead of evaluating these trees I just want to make them part of a SelectExpression and rewrite the remaining selector tree into a projector that references the new columns.
 
 
  
@@ -1673,12 +1673,12 @@ You will see as you examine the code there is one additional complication that d
  
 
 
-Okay, now that I’ve built hybrid expression trees, bound them and gave them a nice spanking, I still need to get text out or the whole process is for naught.  So I took the text generating code from the QueryTranslator and built a new QueryFormatter class whose sole responsibility is to generate the text from an expression tree.  No more needing to actually build the tree at the same time.
+Okay, now that Iâ€™ve built hybrid expression trees, bound them and gave them a nice spanking, I still need to get text out or the whole process is for naught.  So I took the text generating code from the QueryTranslator and built a new QueryFormatter class whose sole responsibility is to generate the text from an expression tree.  No more needing to actually build the tree at the same time.
 
 
  
 
-
+```csharp
 internal class QueryFormatter : DbExpressionVisitor {
 
 
@@ -2201,21 +2201,21 @@ internal class QueryFormatter : DbExpressionVisitor {
 }
 
 
- 
+``` 
 
 
-In addition to adding logic to write out the new SelectExpression node, I’ve advanced the formatting logic to include (gasp) new-lines and indentation.  Now isn’t that special? 
-
-
- 
-
-
-Of course, I also have to end up with a LambdaExpression that builds the result objects. I used to get that out of the ColumnProjector class, but now it’s generating these semantic SQL projections, not at all what I need to do the real heavy-lifting of making actual objects.  So I need to transform it again. I built a little class called ProjectionBuilder to do that.
+In addition to adding logic to write out the new SelectExpression node, Iâ€™ve advanced the formatting logic to include (gasp) new-lines and indentation.  Now isnâ€™t that special? 
 
 
  
 
 
+Of course, I also have to end up with a LambdaExpression that builds the result objects. I used to get that out of the ColumnProjector class, but now itâ€™s generating these semantic SQL projections, not at all what I need to do the real heavy-lifting of making actual objects.  So I need to transform it again. I built a little class called ProjectionBuilder to do that.
+
+
+ 
+
+```csharp
 internal class ProjectionBuilder : DbExpressionVisitor {
 
 
@@ -2275,7 +2275,7 @@ internal class ProjectionBuilder : DbExpressionVisitor {
 
 }
 
-
+```
  
 
 
@@ -2285,17 +2285,17 @@ This class simply does what the ColumnProjector used to do, only it now benefits
  
 
 
-Luckily, I don’t have to rewrite the ProjectionReader. It still works the same as before. What I do get to do is get rid of the ObjectReader, since I now always have a projector expression.  I build one in the QueryBinder automatically every time I see a table.
+Luckily, I donâ€™t have to rewrite the ProjectionReader. It still works the same as before. What I do get to do is get rid of the ObjectReader, since I now always have a projector expression.  I build one in the QueryBinder automatically every time I see a table.
 
 
  
 
 
-That just leaves the putting it all together step.  Here’s the new rewrite to DbQueryProvider.
+That just leaves the putting it all together step.  Hereâ€™s the new rewrite to DbQueryProvider.
 
 
  
-
+```csharp
 
 public class DbQueryProvider : QueryProvider {
 
@@ -2420,10 +2420,10 @@ public class DbQueryProvider : QueryProvider {
 }
 
 
- 
+ ```
 
 
-It’s not too different from before.  The Translate method has multiple steps, invoking the additional visitors, and the Execute method no longer has to build ObjectReader if the projector does not exist.  It always exists.
+Itâ€™s not too different from before.  The Translate method has multiple steps, invoking the additional visitors, and the Execute method no longer has to build ObjectReader if the projector does not exist.  It always exists.
 
 
  
@@ -2434,7 +2434,7 @@ So, now if I write the following query:
 
  
 
-
+```csharp
 var query = db.Customers.Select(c => new {
 
 
@@ -2447,7 +2447,7 @@ var query = db.Customers.Select(c => new {
                                 }
                             })
                         .Where(x => x.Location.City == city);
-
+```
 
 
 It runs successfully producing the following output:
@@ -2455,7 +2455,7 @@ It runs successfully producing the following output:
 
  
 
-
+```sql
 Query:
 
 
@@ -2505,25 +2505,25 @@ WHERE (t2.City = 'London')
 
 
 { Name = Hari Kumar, Location = { City = London, Country = UK } }
-
-
-
- 
-
-
-A better looking query, a better looking result, and it works no matter how many Select’s or Where’s I add, no matter how complex I make each projection.
+```
 
 
  
 
 
+A better looking query, a better looking result, and it works no matter how many Selectâ€™s or Whereâ€™s I add, no matter how complex I make each projection.
+
+
+ 
+
+
  
 
 
  
 
 
-At least I’ll let you think that until I point out the next gaping hole. J
+At least Iâ€™ll let you think that until I point out the next gaping hole. J
 
 
  
