@@ -1,4 +1,4 @@
-#LINQ: Building an IQueryable Provider – Part VI: Nested queries
+# LINQ: Building an IQueryable Provider â€“ Part VI: Nested queries
 
 Matt Warren - MSFT; August 9, 2007
 
@@ -32,7 +32,7 @@ That's not the problem.
 
 The problem is Projection nodes may also appear inside selector expressions themselves.  For example, take a look at the following.
 
-
+```csharp
     var query = from c in db.Customers
 
 
@@ -52,7 +52,7 @@ The problem is Projection nodes may also appear inside selector expressions them
 
 
                 };
-
+```
 
 I added a nested query in the select expression. This is very different than the queries I wrote before, which were only tabular. Now, I'm basically asking my provider to construct a hierarchy, each object is going to have a name and a collection of orders. How in the world am I going to do that? SQL can't even do that. And even if I wanted to disallow it outright, what happens if someone does write this?
 
@@ -90,7 +90,7 @@ So what I need to do is add a function to my good ol' ProjectionRow class that e
 
 
 Here's the new code for ProjectionRow and ProjectionBuilder.
-
+```csharp
     public abstract class ProjectionRow {
 
         public abstract object GetValue(int index);
@@ -168,7 +168,7 @@ Here's the new code for ProjectionRow and ProjectionBuilder.
         }
 
     }
-
+```
 
 
 So, just like I inject code to call GetValue when I see a ColumnExpression, I'm going to inject code to call ExecuteSubQuery when I see a ProjectionExpression.
@@ -181,7 +181,7 @@ Also notice how I pass the subquery as a ConstantExpression.  This is how I tric
 
 
 Next to take a look at is the changed ProjectionReader. Of course, the Enumerator now implements ExecuteSubQuery for me.
-
+```csharp
     internal class ProjectionReader<T> : IEnumerable<T>, IEnumerable {
 
         Enumerator enumerator;
@@ -341,7 +341,7 @@ Next to take a look at is the changed ProjectionReader. Of course, the Enumerato
         }
 
     }
-
+```
 
 
 Now, you can see that when I construct the ProjectionReader I pass the instance of my provider here. I'm going to use that to execute the subquery down in the ExecuteSubQuery function.
@@ -369,7 +369,7 @@ How to do that? I need a tool that will search my expression tree and replace so
 
 
 Here's something, I call it Replacer.  It simply walks the tree looking for references to one node instance and swapping it for references to a different node.
-
+```csharp
     internal class Replacer : DbExpressionVisitor {
 
         Expression searchFor;
@@ -399,7 +399,7 @@ Here's something, I call it Replacer.  It simply walks the tree looking for refe
         }
 
     }
-
+```
 
 Beautiful!  Sometimes I amaze even myself.
 
@@ -420,7 +420,7 @@ I also had to invent a new CanEvaluateLocally rule for Evaluator to use.  I need
 
 
 So now let's take a look on how DbQueryProvider changed
-
+```csharp
     public class DbQueryProvider : QueryProvider {
 
         DbConnection connection;
@@ -525,14 +525,14 @@ So now let's take a look on how DbQueryProvider changed
         }
 
     }
-
+```
 
 
 The only thing that changed is my Translate method. It recognizes when it is handed a ProjectionExpression and chooses not do the work to turn an users query expression into a ProjectionExpression. Instead, it just skips down to the step that builds the command text and projection.
 
 
 Did I forget to mention I added a 'Log' feature just like LINQ to SQL has.  That will help us see what's going on.  I added it here in my Context class too.
-
+```csharp
     public class Northwind {
 
         public Query<Customers> Customers;
@@ -561,13 +561,13 @@ Did I forget to mention I added a 'Log' feature just like LINQ to SQL has.  That
         }
 
     }
-
+```
  
 
 Taking it for a Spin
 
 Now let's give this new magic mojo a spin.
-
+```csharp
         string city = "London";
 
         var query = from c in db.Customers
@@ -597,7 +597,7 @@ Now let's give this new magic mojo a spin.
             }
 
         }
-
+```
 
 
  
@@ -607,7 +607,7 @@ Run this and it outputs the following:
 
 
  
-
+```sql
 Thomas Hardy
         Order: 10355
         Order: 10383
@@ -660,12 +660,12 @@ Hari Kumar
         Order: 10800
         Order: 10804
         Order: 10869
- 
+ ```
 
 
 Here are the queries it executed:  (I used the new .Log property to capture these)
 
-
+```sql
 SELECT t2.ContactName, t2.CustomerID
 FROM (
   SELECT t1.CustomerID, t1.ContactName, t1.Phone, t1.City, t1.Country
@@ -713,7 +713,7 @@ FROM (
   FROM Orders AS t3
 ) AS t4
 WHERE (t4.CustomerID = 'SEVES')
-
+```
 
  
 
