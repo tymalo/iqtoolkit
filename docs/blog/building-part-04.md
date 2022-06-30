@@ -205,141 +205,92 @@ Now all I need is an ObjectReader that works off this LambdaExpression instead o
 Look, here’s one now. 
 
 ```csharp
-internal class ProjectionReader<T> : IEnumerable<T>, IEnumerable 
-{
-
-    Enumerator enumerator;
-    
-    internal ProjectionReader(DbDataReader reader, Func<ProjectionRow, T> projector) 
+    internal class ProjectionReader<T> : IEnumerable<T>, IEnumerable
     {
-        this.enumerator = new Enumerator(reader, projector);
-    }
+        Enumerator enumerator;
 
-
- 
-
-
-    public IEnumerator<T> GetEnumerator() 
-    {
-        Enumerator e = this.enumerator;
-        
-        if (e == null) 
+        internal ProjectionReader(SQLiteDataReader reader, Func<ProjectionRow, T> projector)
         {
-            throw new InvalidOperationException("Cannot enumerate more than once");
+            this.enumerator = new Enumerator(reader, projector);
         }
 
-
-        this.enumerator = null;
-
-        return e;
-    }
-
-    IEnumerator IEnumerable.GetEnumerator() 
-    {
-        return this.GetEnumerator();
-    }
-
-    class Enumerator : ProjectionRow, IEnumerator<T>, IEnumerator, IDisposable 
-    {
-
-        DbDataReader reader;
-        
-        T current;
-
-        Func<ProjectionRow, T> projector;
-        
-        internal Enumerator(DbDataReader reader, Func<ProjectionRow, T> projector) 
+        public IEnumerator<T> GetEnumerator()
         {
-            this.reader = reader;
-            this.projector = projector;
-        }
-        
-        public override object GetValue(int index) 
-        {
-            if (index >= 0) 
+            Enumerator e = this.enumerator;
+
+            if (e == null)
             {
-                if (this.reader.IsDBNull(index)) 
-                {
-                    return null;
-                }
-                else 
-                {
-                    return this.reader.GetValue(index);
-                }
+                throw new InvalidOperationException("Cannot enumerate more than once");
             }
-            throw new IndexOutOfRangeException();
+            this.enumerator = null; return e;
         }
 
-        public T Current {
-
-
-            get { return this.current; }
-
-
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            return this.GetEnumerator();
         }
 
+        class Enumerator : ProjectionRow, IEnumerator<T>, IEnumerator, IDisposable
+        {
 
- 
+            SQLiteDataReader reader;
 
+            T current;
 
-        object IEnumerator.Current {
+            Func<ProjectionRow, T> projector;
 
-
-            get { return this.current; }
-
-
-        }
-
-
- 
-
-
-        public bool MoveNext() {
-
-
-            if (this.reader.Read()) {
-
-
-                this.current = this.projector(this);
-
-
-                return true;
-
-
+            internal Enumerator(SQLiteDataReader reader, Func<ProjectionRow, T> projector)
+            {
+                this.reader = reader;
+                this.projector = projector;
             }
 
+            public override object GetValue(int index)
+            {
+                if (index >= 0)
+                {
+                    if (this.reader.IsDBNull(index))
+                    {
+                        return null;
+                    }
+                    else
+                    {
+                        return this.reader.GetValue(index);
+                    }
+                }
+                throw new IndexOutOfRangeException();
+            }
+            public T Current
+            {
+                get { return this.current; }
+            }
 
-            return false;
+            object IEnumerator.Current
+            {
+                get { return this.current; }
+            }
 
+            public bool MoveNext()
+            {
+                if (this.reader.Read())
+                {
+                    this.current = this.projector(this);
+                    return true;
+                }
 
+                return false;
+            }
+
+            public void Reset()
+            {
+            }
+
+            public void Dispose()
+            {
+                this.reader.Dispose();
+            }
         }
-
-
- 
-
-
-        public void Reset() {
-
-
-        }
-
-
- 
-
-
-        public void Dispose() {
-
-
-            this.reader.Dispose();
-
-
-        }
-
-
     }
-
-
-}
 ```
 
 
@@ -355,132 +306,56 @@ It’s nice when everything just seems to fit together.  Now I just need to asse
 So here’s my new provider:
 
 ```csharp
-public class DbQueryProvider : QueryProvider {
-
-
+public class DbQueryProvider : QueryProvider 
+{
     DbConnection connection;
-
-
  
-
-
-    public DbQueryProvider(DbConnection connection) {
-
-
+    public DbQueryProvider(DbConnection connection) 
+    {
         this.connection = connection;
-
-
     }
-
-
  
-
-
-    public override string GetQueryText(Expression expression) {
-
-
+    public override string GetQueryText(Expression expression) 
+    {
         return this.Translate(expression).CommandText;
-
-
     }
-
-
  
-
-
-    public override object Execute(Expression expression) {
-
-
+    public override object Execute(Expression expression) 
+    {
         TranslateResult result = this.Translate(expression);
-
-
  
-
-
         DbCommand cmd = this.connection.CreateCommand();
-
-
         cmd.CommandText = result.CommandText;
-
-
         DbDataReader reader = cmd.ExecuteReader();
-
-
  
-
-
         Type elementType = TypeSystem.GetElementType(expression.Type);
-
-
-        if (result.Projector != null) {
-
-
+        if (result.Projector != null) 
+        {
             Delegate projector = result.Projector.Compile();
 
-
             return Activator.CreateInstance(
-
-
                 typeof(ProjectionReader<>).MakeGenericType(elementType),
-
-
                 BindingFlags.Instance | BindingFlags.NonPublic, null,
-
-
                 new object[] { reader, projector },
-
-
                 null
-
-
                 );
-
-
         }
-
-
-        else {
-
-
+        else 
+        {
             return Activator.CreateInstance(
-
-
                 typeof(ObjectReader<>).MakeGenericType(elementType),
-
-
                 BindingFlags.Instance | BindingFlags.NonPublic, null,
-
-
                 new object[] { reader },
-
-
                 null
-
-
                 );
-
-
         }
-
-
     }
-
-
  
-
-
-    private TranslateResult Translate(Expression expression) {
-
-
+    private TranslateResult Translate(Expression expression) 
+    {
         expression = Evaluator.PartialEval(expression);
-
-
         return new QueryTranslator().Translate(expression);
-
-
     }
-
-
 }
 ```
 
