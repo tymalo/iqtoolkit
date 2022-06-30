@@ -36,12 +36,9 @@ Of course, you might be able to think of a real cheesy solution that just combin
 Fortunately, it’s still easy.  I just have to convert the selector function I already have into the one I need.  What is the one I need?  Well, one that reads data from a DbDataReader for starters.  Okay, sure, but maybe if I abstract the DataReader out of the problem and make it about getting the data from a method called ‘GetValue’.  Yes, I know DataReader already has one of those, but it also has this nasty habit of returning DbNull’s.
 
 ```csharp
-public abstract class ProjectionRow {
-
-
+public abstract class ProjectionRow 
+{
     public abstract object GetValue(int index);
-
-
 }
 ```
 
@@ -52,114 +49,61 @@ So here’s this simple abstract base class that represents a row of data.  If m
 Let’s take a look at the code that builds my new selector.
 
 ```csharp
-internal class ColumnProjection {
-
-
+internal class ColumnProjection 
+{
     internal string Columns;
-
-
     internal Expression Selector;
-
-
 }
 
-
- 
-
-
-internal class ColumnProjector : ExpressionVisitor {
-
+internal class ColumnProjector : ExpressionVisitor 
+{
 
     StringBuilder sb;
-
-
     int iColumn;
-
-
+    
     ParameterExpression row;
-
-
     static MethodInfo miGetValue;
-
-
- 
-
-
-    internal ColumnProjector() {
-
-
-        if (miGetValue == null) {
-
-
+    
+    internal ColumnProjector() 
+    {
+        if (miGetValue == null) 
+        {
             miGetValue = typeof(ProjectionRow).GetMethod("GetValue");
-
-
         }
-
-
     }
 
-
- 
-
-
-    internal ColumnProjection ProjectColumns(Expression expression, ParameterExpression row) {
-
+    internal ColumnProjection ProjectColumns(Expression expression, ParameterExpression row) 
+    {
 
         this.sb = new StringBuilder();
-
-
+        
         this.row = row;
-
 
         Expression selector = this.Visit(expression);
 
-
         return new ColumnProjection { Columns = this.sb.ToString(), Selector = selector };
-
-
     }
+    
+    protected override Expression VisitMemberAccess(MemberExpression m) 
+    {
 
+        if (m.Expression != null && m.Expression.NodeType == ExpressionType.Parameter) 
+        {
 
- 
-
-
-    protected override Expression VisitMemberAccess(MemberExpression m) {
-
-
-        if (m.Expression != null && m.Expression.NodeType == ExpressionType.Parameter) {
-
-
-            if (this.sb.Length > 0) {
-
-
+            if (this.sb.Length > 0) 
+            {
                 this.sb.Append(", ");
-
-
             }
-
 
             this.sb.Append(m.Member.Name);
 
-
             return Expression.Convert(Expression.Call(this.row, miGetValue, Expression.Constant(iColumn++)), m.Type);
-
-
         }
-
-
-        else {
-
-
+        else 
+        {
             return base.VisitMemberAccess(m);
-
-
         }
-
-
     }
-
-
 }
 ```
 
@@ -173,148 +117,78 @@ Notice this visitor also builds up a string representing our SQL select clause. 
 Let’s just see where this fits in.  Here’s my modified QueryTranslator. (The relevant bits anyway.)
 
 ```csharp
-internal class TranslateResult {
-
-
+internal class TranslateResult 
+{
     internal string CommandText;
-
-
     internal LambdaExpression Prsojector;
-
-
 }
 
-
-
-internal class QueryTranslator : ExpressionVisitor {
-
-
+internal class QueryTranslator : ExpressionVisitor 
+{
     StringBuilder sb;
-
 
     ParameterExpression row;
 
-
     ColumnProjection projection;
 
-
- 
-
-
-    internal QueryTranslator() {
-
-
+    internal QueryTranslator() 
+    {
     }
 
-
- 
-
-
-    internal TranslateResult Translate(Expression expression) {
-
-
+    internal TranslateResult Translate(Expression expression) 
+    {
         this.sb = new StringBuilder();
-
-
         this.row = Expression.Parameter(typeof(ProjectionRow), "row");
-
 
         this.Visit(expression);
 
-
-        return new TranslateResult {
-
-
+        return new TranslateResult 
+        {
             CommandText = this.sb.ToString(),
-
-
             Projector = this.projection != null ? Expression.Lambda(this.projection.Selector, this.row) : null
-
-
         };
-
-
     }
 
+    protected override Expression VisitMethodCall(MethodCallExpression m) 
+    {
+        if (m.Method.DeclaringType == typeof(Queryable)) 
+        {
 
- 
-
-
-    protected override Expression VisitMethodCall(MethodCallExpression m) {
-
-
-        if (m.Method.DeclaringType == typeof(Queryable)) {
-
-
-            if (m.Method.Name == "Where") {
-
-
+            if (m.Method.Name == "Where") 
+            {
                 sb.Append("SELECT * FROM (");
-
 
                 this.Visit(m.Arguments[0]);
 
-
                 sb.Append(") AS T WHERE ");
-
-
+                
                 LambdaExpression lambda = (LambdaExpression)StripQuotes(m.Arguments[1]);
-
 
                 this.Visit(lambda.Body);
 
-
                 return m;
-
-
             }
-
-
-            else if (m.Method.Name == "Select") {
-
-
+            else if (m.Method.Name == "Select") 
+            {
                 LambdaExpression lambda = (LambdaExpression)StripQuotes(m.Arguments[1]);
-
 
                 ColumnProjection projection = new ColumnProjector().ProjectColumns(lambda.Body, this.row);
 
-
                 sb.Append("SELECT ");
-
-
                 sb.Append(projection.Columns);
-
-
                 sb.Append(" FROM (");
 
-
                 this.Visit(m.Arguments[0]);
-
-
                 sb.Append(") AS T ");
-
-
                 this.projection = projection;
-
-
+                
                 return m;
-
-
             }
-
-
         }
-
-
         throw new NotSupportedException(string.Format("The method '{0}' is not supported", m.Method.Name));
-
-
     }
 
-
-
     . . .
-
 
 }
 ```
@@ -331,131 +205,70 @@ Now all I need is an ObjectReader that works off this LambdaExpression instead o
 Look, here’s one now. 
 
 ```csharp
-internal class ProjectionReader<T> : IEnumerable<T>, IEnumerable {
-
+internal class ProjectionReader<T> : IEnumerable<T>, IEnumerable 
+{
 
     Enumerator enumerator;
-
-
- 
-
-
-    internal ProjectionReader(DbDataReader reader, Func<ProjectionRow, T> projector) {
-
-
+    
+    internal ProjectionReader(DbDataReader reader, Func<ProjectionRow, T> projector) 
+    {
         this.enumerator = new Enumerator(reader, projector);
-
-
     }
 
 
  
 
 
-    public IEnumerator<T> GetEnumerator() {
-
-
+    public IEnumerator<T> GetEnumerator() 
+    {
         Enumerator e = this.enumerator;
-
-
-        if (e == null) {
-
-
+        
+        if (e == null) 
+        {
             throw new InvalidOperationException("Cannot enumerate more than once");
-
-
         }
 
 
         this.enumerator = null;
 
-
         return e;
-
-
     }
 
-
- 
-
-
-    IEnumerator IEnumerable.GetEnumerator() {
-
-
+    IEnumerator IEnumerable.GetEnumerator() 
+    {
         return this.GetEnumerator();
-
-
     }
 
-
- 
-
-
-    class Enumerator : ProjectionRow, IEnumerator<T>, IEnumerator, IDisposable {
-
+    class Enumerator : ProjectionRow, IEnumerator<T>, IEnumerator, IDisposable 
+    {
 
         DbDataReader reader;
-
-
+        
         T current;
 
-
         Func<ProjectionRow, T> projector;
-
-
- 
-
-
-        internal Enumerator(DbDataReader reader, Func<ProjectionRow, T> projector) {
-
-
+        
+        internal Enumerator(DbDataReader reader, Func<ProjectionRow, T> projector) 
+        {
             this.reader = reader;
-
-
             this.projector = projector;
-
-
         }
-
-
- 
-
-
-        public override object GetValue(int index) {
-
-
-            if (index >= 0) {
-
-
-                if (this.reader.IsDBNull(index)) {
-
-
+        
+        public override object GetValue(int index) 
+        {
+            if (index >= 0) 
+            {
+                if (this.reader.IsDBNull(index)) 
+                {
                     return null;
-
-
                 }
-
-
-                else {
-
-
+                else 
+                {
                     return this.reader.GetValue(index);
-
-
                 }
-
-
             }
-
-
             throw new IndexOutOfRangeException();
-
-
         }
-
-
- 
-
 
         public T Current {
 
