@@ -33,24 +33,13 @@ That's not the problem.
 The problem is Projection nodes may also appear inside selector expressions themselves.  For example, take a look at the following.
 
 ```csharp
-    var query = from c in db.Customers
-
-
-                select new {
-
-
+var query = from c in db.Customers
+                select new 
+                {
                     Name = c.ContactName,
-
-
                     Orders = from o in db.Orders
-
-
                              where o.CustomerID == c.CustomerID
-
-
                              select o
-
-
                 };
 ```
 
@@ -91,83 +80,52 @@ So what I need to do is add a function to my good ol' ProjectionRow class that e
 
 Here's the new code for ProjectionRow and ProjectionBuilder.
 ```csharp
-    public abstract class ProjectionRow {
-
+public abstract class ProjectionRow 
+{
         public abstract object GetValue(int index);
-
         public abstract IEnumerable<E> ExecuteSubQuery<E>(LambdaExpression query);
+}
 
+internal class ProjectionBuilder : DbExpressionVisitor 
+{
+    ParameterExpression row;
+    string rowAlias;
+    static MethodInfo miGetValue;
+    static MethodInfo miExecuteSubQuery;
+    internal ProjectionBuilder() 
+    {
+        if (miGetValue == null) 
+        {
+            miGetValue = typeof(ProjectionRow).GetMethod("GetValue");
+            miExecuteSubQuery = typeof(ProjectionRow).GetMethod("ExecuteSubQuery");
+        }
     }
-
-    internal class ProjectionBuilder : DbExpressionVisitor {
-
-        ParameterExpression row;
-
-        string rowAlias;
-
-        static MethodInfo miGetValue;
-
-        static MethodInfo miExecuteSubQuery;
-
-
-        internal ProjectionBuilder() {
-
-            if (miGetValue == null) {
-
-                miGetValue = typeof(ProjectionRow).GetMethod("GetValue");
-
-                miExecuteSubQuery = typeof(ProjectionRow).GetMethod("ExecuteSubQuery");
-
-            }
-
-        }
-
-
-        internal LambdaExpression Build(Expression expression, string alias) {
-
-            this.row = Expression.Parameter(typeof(ProjectionRow), "row");
-
-            this.rowAlias = alias;
-
-            Expression body = this.Visit(expression);
-
-            return Expression.Lambda(body, this.row);
-
-        }
-
-
-        protected override Expression VisitColumn(ColumnExpression column) {
-
-            if (column.Alias == this.rowAlias) {
-
-                return Expression.Convert(Expression.Call(this.row, miGetValue, Expression.Constant(column.Ordinal)), column.Type);
-
-            }
-
-            return column;
-
-        }
-
-
-        protected override Expression VisitProjection(ProjectionExpression proj) {
-
-            LambdaExpression subQuery = Expression.Lambda(base.VisitProjection(proj), this.row);
-
-            Type elementType = TypeSystem.GetElementType(subQuery.Body.Type);
-
-            MethodInfo mi = miExecuteSubQuery.MakeGenericMethod(elementType);
-
-            return Expression.Convert(
-
-                Expression.Call(this.row, mi, Expression.Constant(subQuery)),
-
-                proj.Type
-
-                );
-
-        }
-
+    internal LambdaExpression Build(Expression expression, string alias) 
+    {
+        this.row = Expression.Parameter(typeof(ProjectionRow), "row");
+        this.rowAlias = alias;
+        Expression body = this.Visit(expression);
+        return Expression.Lambda(body, this.row);
     }
+    protected override Expression VisitColumn(ColumnExpression column) 
+    {
+        if (column.Alias == this.rowAlias) 
+        {
+            return Expression.Convert(Expression.Call(this.row, miGetValue, Expression.Constant(column.Ordinal)), column.Type);
+        }
+        return column;
+    }
+    protected override Expression VisitProjection(ProjectionExpression proj) 
+    {
+        LambdaExpression subQuery = Expression.Lambda(base.VisitProjection(proj), this.row);
+        Type elementType = TypeSystem.GetElementType(subQuery.Body.Type);
+        MethodInfo mi = miExecuteSubQuery.MakeGenericMethod(elementType);
+        return Expression.Convert(
+            Expression.Call(this.row, mi, Expression.Constant(subQuery)),
+            proj.Type
+            );
+    }
+}
 ```
 
 
@@ -182,165 +140,101 @@ Also notice how I pass the subquery as a ConstantExpression.  This is how I tric
 
 Next to take a look at is the changed ProjectionReader. Of course, the Enumerator now implements ExecuteSubQuery for me.
 ```csharp
-    internal class ProjectionReader<T> : IEnumerable<T>, IEnumerable {
-
-        Enumerator enumerator;
-
-        internal ProjectionReader(DbDataReader reader, Func<ProjectionRow, T> projector, IQueryProvider provider) {
-
-            this.enumerator = new Enumerator(reader, projector, provider);
-
-        }
-
-
-        public IEnumerator<T> GetEnumerator() {
-
-            Enumerator e = this.enumerator;
-
-            if (e == null) {
-
-                throw new InvalidOperationException("Cannot enumerate more than once");
-
-            }
-
-            this.enumerator = null;
-
-            return e;
-
-        }
-
-
-        IEnumerator IEnumerable.GetEnumerator() {
-
-            return this.GetEnumerator();
-
-        }
-
-
-        class Enumerator : ProjectionRow, IEnumerator<T>, IEnumerator, IDisposable {
-
-            DbDataReader reader;
-
-            T current;
-
-            Func<ProjectionRow, T> projector;
-
-            IQueryProvider provider;
-
-
-            internal Enumerator(DbDataReader reader, Func<ProjectionRow, T> projector, IQueryProvider provider) {
-
-                this.reader = reader;
-
-                this.projector = projector;
-
-                this.provider = provider;
-
-            }
-
-
-            public override object GetValue(int index) {
-
-                if (index >= 0) {
-
-                    if (this.reader.IsDBNull(index)) {
-
-                        return null;
-
-                    }
-
-                    else {
-
-                        return this.reader.GetValue(index);
-
-                    }
-
-                }
-
-                throw new IndexOutOfRangeException();
-
-            }
-
-
-            public override IEnumerable<E> ExecuteSubQuery<E>(LambdaExpression query) {
-
-                ProjectionExpression projection = (ProjectionExpression) new Replacer().Replace(query.Body, query.Parameters[0], Expression.Constant(this));
-
-                projection = (ProjectionExpression) Evaluator.PartialEval(projection, CanEvaluateLocally);
-
-                IEnumerable<E> result = (IEnumerable<E>)this.provider.Execute(projection);
-
-                List<E> list = new List<E>(result);
-
-                if (typeof(IQueryable<E>).IsAssignableFrom(query.Body.Type)) {
-
-                    return list.AsQueryable();
-
-                }
-
-                return list;
-
-            }
-
-
-            private static bool CanEvaluateLocally(Expression expression) {
-
-                if (expression.NodeType == ExpressionType.Parameter ||
-
-                    expression.NodeType.IsDbExpression()) {
-
-                    return false;
-
-                }
-
-                return true;
-
-            }
-
-
-            public T Current {
-
-                get { return this.current; }
-
-            }
-
-
-            object IEnumerator.Current {
-
-                get { return this.current; }
-
-            }
-
-
-            public bool MoveNext() {
-
-                if (this.reader.Read()) {
-
-                    this.current = this.projector(this);
-
-                    return true;
-
-                }
-
-                return false;
-
-            }
-
-
-            public void Reset() {
-
-            }
-
-
-            public void Dispose() {
-
-                this.reader.Dispose();
-
-            }
-
-        }
-
+internal class ProjectionReader<T> : IEnumerable<T>, IEnumerable 
+{
+    Enumerator enumerator;
+    internal ProjectionReader(DbDataReader reader, Func<ProjectionRow, T> projector, IQueryProvider provider) 
+    {
+        this.enumerator = new Enumerator(reader, projector, provider);
     }
+    public IEnumerator<T> GetEnumerator() 
+    {
+        Enumerator e = this.enumerator;
+        if (e == null) 
+        {
+            throw new InvalidOperationException("Cannot enumerate more than once");
+        }
+        this.enumerator = null;
+        return e;
+    }
+    IEnumerator IEnumerable.GetEnumerator() 
+    {
+        return this.GetEnumerator();
+    }
+    class Enumerator : ProjectionRow, IEnumerator<T>, IEnumerator, IDisposable 
+    {
+        DbDataReader reader;
+        T current;
+        Func<ProjectionRow, T> projector;
+        IQueryProvider provider;
+        internal Enumerator(DbDataReader reader, Func<ProjectionRow, T> projector, IQueryProvider provider) 
+        {
+            this.reader = reader;
+            this.projector = projector;
+            this.provider = provider;
+        }
+        public override object GetValue(int index) 
+        {
+            if (index >= 0) 
+            {
+                if (this.reader.IsDBNull(index)) 
+                {
+                    return null;
+                }
+                else 
+                {
+                    return this.reader.GetValue(index);
+                }
+            }
+            throw new IndexOutOfRangeException();
+        }
+        public override IEnumerable<E> ExecuteSubQuery<E>(LambdaExpression query) 
+        {
+            ProjectionExpression projection = (ProjectionExpression) new Replacer().Replace(query.Body, query.Parameters[0], Expression.Constant(this));
+            projection = (ProjectionExpression) Evaluator.PartialEval(projection, CanEvaluateLocally);
+            IEnumerable<E> result = (IEnumerable<E>)this.provider.Execute(projection);
+            List<E> list = new List<E>(result);
+            if (typeof(IQueryable<E>).IsAssignableFrom(query.Body.Type)) 
+            {
+                return list.AsQueryable();
+            }
+            return list;
+        }
+        private static bool CanEvaluateLocally(Expression expression) 
+        {
+            if (expression.NodeType == ExpressionType.Parameter ||
+                expression.NodeType.IsDbExpression()) 
+                {
+                return false;
+            }
+            return true;
+        }
+        public T Current 
+        {
+            get { return this.current; }
+        }
+        object IEnumerator.Current 
+        {
+            get { return this.current; }
+        }
+        public bool MoveNext() 
+        {
+            if (this.reader.Read()) 
+            {
+                this.current = this.projector(this);
+                return true;
+            }
+            return false;
+        }
+        public void Reset() 
+        {
+        }
+        public void Dispose() 
+        {
+            this.reader.Dispose();
+        }
+    }
+}
 ```
 
 
@@ -370,35 +264,27 @@ How to do that? I need a tool that will search my expression tree and replace so
 
 Here's something, I call it Replacer.  It simply walks the tree looking for references to one node instance and swapping it for references to a different node.
 ```csharp
-    internal class Replacer : DbExpressionVisitor {
+internal class Replacer : DbExpressionVisitor 
+{
+    Expression searchFor;
+    Expression replaceWith;
 
-        Expression searchFor;
-
-        Expression replaceWith;
-
-        internal Expression Replace(Expression expression, Expression searchFor, Expression replaceWith) {
-
-            this.searchFor = searchFor;
-
-            this.replaceWith = replaceWith;
-
-            return this.Visit(expression);
-
-        }
-
-        protected override Expression Visit(Expression exp) {
-
-            if (exp == this.searchFor) {
-
-                return this.replaceWith;
-
-            }
-
-            return base.Visit(exp);
-
-        }
-
+    internal Expression Replace(Expression expression, Expression searchFor, Expression replaceWith) 
+    {
+        this.searchFor = searchFor;
+        this.replaceWith = replaceWith;
+        return this.Visit(expression);
     }
+
+    protected override Expression Visit(Expression exp) 
+    {
+        if (exp == this.searchFor) 
+        {
+            return this.replaceWith;
+        }
+        return base.Visit(exp);
+    }
+}
 ```
 
 Beautiful!  Sometimes I amaze even myself.
@@ -421,110 +307,71 @@ I also had to invent a new CanEvaluateLocally rule for Evaluator to use.  I need
 
 So now let's take a look on how DbQueryProvider changed
 ```csharp
-    public class DbQueryProvider : QueryProvider {
+public class DbQueryProvider : QueryProvider 
+{
+    DbConnection connection;
+    TextWriter log;
 
-        DbConnection connection;
-
-        TextWriter log;
-
-        public DbQueryProvider(DbConnection connection) {
-
-            this.connection = connection;
-
-        }
-
-
-        public TextWriter Log {
-
-            get { return this.log; }
-
-            set { this.log = value; }
-
-        }
-
-
-        public override string GetQueryText(Expression expression) {
-
-            return this.Translate(expression).CommandText;
-
-        }
-
-
-        public override object Execute(Expression expression) {
-
-            return this.Execute(this.Translate(expression));
-
-        }
-
-
-        private object Execute(TranslateResult query) {
-
-            Delegate projector = query.Projector.Compile();
-
-
-            if (this.log != null) {
-
-                this.log.WriteLine(query.CommandText);
-
-                this.log.WriteLine();
-
-            }
-
-
-            DbCommand cmd = this.connection.CreateCommand();
-
-            cmd.CommandText = query.CommandText;
-
-            DbDataReader reader = cmd.ExecuteReader();
-
-
-            Type elementType = TypeSystem.GetElementType(query.Projector.Body.Type);
-
-            return Activator.CreateInstance(
-
-                typeof(ProjectionReader<>).MakeGenericType(elementType),
-
-                BindingFlags.Instance | BindingFlags.NonPublic, null,
-
-                new object[] { reader, projector, this },
-
-                null
-
-                );
-
-        }
-
-
-        internal class TranslateResult {
-
-            internal string CommandText;
-
-            internal LambdaExpression Projector;
-
-        }
-
-
-        private TranslateResult Translate(Expression expression) {
-
-            ProjectionExpression projection = expression as ProjectionExpression;
-
-            if (projection == null) {
-
-                expression = Evaluator.PartialEval(expression);
-
-                projection = (ProjectionExpression)new QueryBinder().Bind(expression);
-
-            }
-
-            string commandText = new QueryFormatter().Format(projection.Source);
-
-            LambdaExpression projector = new ProjectionBuilder().Build(projection.Projector, projection.Source.Alias);
-
-            return new TranslateResult { CommandText = commandText, Projector = projector };
-
-        }
-
+    public DbQueryProvider(DbConnection connection) 
+    {
+        this.connection = connection;
     }
+
+    public TextWriter Log 
+    {
+        get { return this.log; }
+        set { this.log = value; }
+    }
+
+    public override string GetQueryText(Expression expression) 
+    {
+        return this.Translate(expression).CommandText;
+    }
+
+    public override object Execute(Expression expression) 
+    {
+        return this.Execute(this.Translate(expression));
+    }
+
+    private object Execute(TranslateResult query) 
+    {
+        Delegate projector = query.Projector.Compile();
+        if (this.log != null) 
+        {
+            this.log.WriteLine(query.CommandText);
+            this.log.WriteLine();
+        }
+        DbCommand cmd = this.connection.CreateCommand();
+        cmd.CommandText = query.CommandText;
+        DbDataReader reader = cmd.ExecuteReader();
+        Type elementType = TypeSystem.GetElementType(query.Projector.Body.Type);
+        return Activator.CreateInstance(
+            typeof(ProjectionReader<>).MakeGenericType(elementType),
+            BindingFlags.Instance | BindingFlags.NonPublic, null,
+            new object[] { reader, projector, this },
+            null
+            );
+    }
+
+    internal class TranslateResult 
+    {
+        internal string CommandText;
+        internal LambdaExpression Projector;
+    }
+
+    private TranslateResult Translate(Expression expression) 
+    {
+        ProjectionExpression projection = expression as ProjectionExpression;
+        if (projection == null) 
+        {
+            expression = Evaluator.PartialEval(expression);
+            projection = (ProjectionExpression)new QueryBinder().Bind(expression);
+        }
+        string commandText = new QueryFormatter().Format(projection.Source);
+        LambdaExpression projector = new ProjectionBuilder().Build(projection.Projector, projection.Source.Alias);
+        return new TranslateResult { CommandText = commandText, Projector = projector };
+    }
+}
 ```
 
 
@@ -533,34 +380,25 @@ The only thing that changed is my Translate method. It recognizes when it is han
 
 Did I forget to mention I added a 'Log' feature just like LINQ to SQL has.  That will help us see what's going on.  I added it here in my Context class too.
 ```csharp
-    public class Northwind {
+public class Northwind 
+{
+    public Query<Customers> Customers;
+    public Query<Orders> Orders;
+    private DbQueryProvider provider;
 
-        public Query<Customers> Customers;
-
-        public Query<Orders> Orders;
-
-        private DbQueryProvider provider;
-
-        public Northwind(DbConnection connection) {
-
-            this.provider = new DbQueryProvider(connection);
-
-            this.Customers = new Query<Customers>(this.provider);
-
-            this.Orders = new Query<Orders>(this.provider);
-
-        }
-
-
-        public TextWriter Log {
-
-            get { return this.provider.Log; }
-
-            set { this.provider.Log = value; }
-
-        }
-
+    public Northwind(DbConnection connection) 
+    {
+        this.provider = new DbQueryProvider(connection);
+        this.Customers = new Query<Customers>(this.provider);
+        this.Orders = new Query<Orders>(this.provider);
     }
+
+    public TextWriter Log 
+    {
+        get { return this.provider.Log; }
+        set { this.provider.Log = value; }
+    }
+}
 ```
  
 
@@ -568,35 +406,26 @@ Taking it for a Spin
 
 Now let's give this new magic mojo a spin.
 ```csharp
-        string city = "London";
+string city = "London";
 
-        var query = from c in db.Customers
+var query = from c in db.Customers
+            where c.City == city
+            select new 
+            {
+                Name = c.ContactName,
+                Orders = from o in db.Orders
+                            where o.CustomerID == c.CustomerID
+                            select o
+            };
 
-                    where c.City == city
-
-                    select new {
-
-                        Name = c.ContactName,
-
-                        Orders = from o in db.Orders
-
-                                 where o.CustomerID == c.CustomerID
-
-                                 select o
-
-                    };
-
-        foreach (var item in query) {
-
-            Console.WriteLine("{0}", item.Name);
-
-            foreach (var ord in item.Orders) {
-
-                Console.WriteLine("\tOrder: {0}", ord.OrderID);
-
-            }
-
-        }
+foreach (var item in query) 
+{
+    Console.WriteLine("{0}", item.Name);
+    foreach (var ord in item.Orders) 
+    {
+        Console.WriteLine("\tOrder: {0}", ord.OrderID);
+    }
+}
 ```
 
 
