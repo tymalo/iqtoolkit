@@ -37,7 +37,7 @@ The full source code and redistributable DLL's can be found at:
 http://www.codeplex.com/IQToolkit
 
 
-Faster is Better
+## Faster is Better
 
 One of the big things I tried to tackle this time around was to finally do some performance improvements.  Until now, the only performance considerations were in the design of compiled queries and the use of compiled LINQ expressions for materializing objects.  Yet, when I looked at actual performance of compiled queries versus straight ADO, there was still a lot of overhead.
 
@@ -49,43 +49,30 @@ I tried many variations of solutions. Ideally, the runtime code would simply kno
 
 Here’s an example of the GetInt32 helper method.
 
+```csharp
 public static class FieldReader
-
 {
   ...
   public static Int32 GetInt32(DbEntityProviderBase provider, DbDataReader reader, int ordinal)
-
   {
-
      if (reader.IsDBNull(ordinal))
-
      {
-
          return default(Int32);
-
      }
 
      try
-
      {
-
          return reader.GetInt32(ordinal);
-
      }
-
      catch
-
      {
-
          return (Int32)provider.Convert(reader.GetValue(ordinal), typeof(Int32));
-
      }
-
   }
 
   ...
-
 }
+```
 
 As long as the expected type is correct, the faster DataReader.GetInt32 method is called. If that fails, then the fallback is to call the general GetValue method and coerce the result.  This should rarely happen.
 
@@ -93,7 +80,7 @@ As long as the expected type is correct, the faster DataReader.GetInt32 method i
 This is all it took to get the compiled query into very low overhead versus direct ADO calls; mostly less than 3%. I’ve added a performance test you can run to check it out on your set up. Of course, this will vary depending on the query, the hardware, the load on the server and the network latency.
 
 
-Caching Queries
+## Caching Queries
 
 “Why can’t the provider simply cache the queries for me.”  I’ve gotten this request a lot.  Sometimes from direct pleas in email, other times from those of you trying to do it yourself and asking for advice. 
 
@@ -106,12 +93,13 @@ Of course, my usual reaction is to give a heavy sigh in the privacy of my office
 
 What I built is a new piece of code called the ‘QueryCache’.  It is actually implemented to be generic enough that it will work with your own IQueryable provider. Yet its not currently integrated into any provider, though you may choose to embed it into yours.  You can, however, use the cache as is to execute your queries and take advantage of its cache-y goodness. You don’t have to make delegates and invoke them, you simply have to give the cache your query and it will give you back the results.
 
-
+```csharp
 var cache = new QueryCache(10);
 
 var query = from c in db.Customers where c.City == "London" select c;
 
 var result = cache.Execute(query);
+```
 
 Here’s how it works.  The cache maintains a most-recently-used list of compiled queries.  Every time you execute a query via the cache, the cache compares your query against the ones in the cache. If it finds a match, it simply uses the existing compiled query and invokes it. If not, it makes a new compiled query and adds it to the list.
 
@@ -121,9 +109,11 @@ Of course, that’s the easy part.
 
 The hard part is figuring out how to compare an IQueryable query object against a list of compiled-query delegate objects and determine which ones can be reused. For example, are these two the same query?
 
-
+```csharp
 var query1 = from c in db.Customers where c.City == "London" select c;
 var query2 = from c in db.Customers where c.City == "Seattle" select c;
+```
+
 
 Technically they are different expression trees, but if that’s the deciding factor then I might as well give up now. They are structurally similar and so it is logical to assume that a query compiled for one should be nearly identical to a query compiled for the other. If I were using compiled queries directly I would simply choose to make the name of the city a parameter to the compiled query delegate and invoke it with different values. So isn’t that just what I want the cache to do for me? 
 
@@ -155,7 +145,7 @@ So I leave the cache, for now, as something you can explicitly opt-in to using, 
 Please, give it a try.  Feedback is welcome.
 
 
-Expression Evaluator
+## Expression Evaluator
 
 Sometimes you may want to execute expression trees as code without actually turning it into true runtime code. You may be running on a platform that does not currently support the Expression.Compile() method (or the ability to use Reflection.Emit to generate IL at runtime) like Windows Mobile. I’ve been encouraged by folks here at Microsoft to think about this from time to time, so I set out to explore this space and the result is a whole mess code called the ExpressionEvaluator, which is an expression tree interpreter. I added my experimental solution to the toolkit in case it is beneficial for someone. It is a lot of code, so it doesn’t compile into the library by default. You have to enable it with a specific #define, NOREFEMIT.  This will also switch over all direct uses of Reflection.Emit in the toolkit to using this evaluator.
 
@@ -163,7 +153,7 @@ Sometimes you may want to execute expression trees as code without actually turn
 It has a hefty performance overhead, so I would not consider it a viable alternative to Reflection.Emit. I’ve even added many tricks to avoid calls to reflection and boxing. This has made it a lot faster than a naive solution, but still it pales in comparison to real IL.  However, in cases where there is no alternative, its probably the best you are going to get.
 
 
-Crazy Antics
+## Crazy Antics
 
 In keeping with the spirit of making changes for no good reason, I’ve unbundled the base set of toolkit code from the ADO provider specific bits. So now if you are using IQToolkit to build your own non-ADO based provider you don’t have to be dragging the rest of it along for the ride.  All the SQL translation and DbEntityProvider goodness is now in its own DLL, IQToolkit.Data.dll. This means you’ll probably have to tweak your projects to include this new DLL, but that’s about all.
 
@@ -171,7 +161,7 @@ In keeping with the spirit of making changes for no good reason, I’ve unbundled 
 The DLL list is now:
 
 
-
+```
 IQToolkit.dll
 IQToolkit.Data.dll
 IQToolkit.Data.Access.dll
@@ -179,11 +169,11 @@ IQToolkit.Data.SqlClient.dll
 IQToolkit.Data.SqlServerCe.dll
 IQToolkit.Data.MySql.dll
 IQToolkit.Data.SQLite.dll
-
+```
 
 Of course, as always, you only need around the ones you are using, or none of them if you are simply lifting the code out as source.
 
 
-That’s All Folks
+## That’s All Folks
 
 I’m sure there are many more wonderful nuggets of goodness I added but forgot to mention.  If you discover any of them please file a full report at http://www.codeplex.com/iqtoolkit. 

@@ -16,7 +16,7 @@ Getting this version of the toolkit together has taken a lot of sleepless nights
 Okay, enough with the flavor text, let's get to the crunch.
 
 
-What's inside:
+## What's inside:
 
 
 
@@ -35,7 +35,7 @@ Entity Sessions - The session concept adds identity caching, change tracking and
 Provider Factory - Create providers on the fly w/o knowing anything more than the database name and mapping.
 
 
-Madness
+## Madness
 
 
 
@@ -45,7 +45,7 @@ The full source code and redistributable DLL's can be found at:
 http://www.codeplex.com/IQToolkit
 
 
-More Providers
+## More Providers
 
 
 MySQL -- With the stewardship of MySQL in doubt after the purchase of Sun by Oracle, I was leery of taking on the challenge of making a MySQL provider for the toolkit. Yet, the benefits of doing so turned out to be very significant and not just for the MySQL users, as it forced me to challenge some of my very assumptions about SQL which in turn made some of my meager testing better, which in turn made the toolkit better as a whole. 
@@ -58,17 +58,21 @@ There were a few problems I uncovered while trying to get MySQL to pass the test
 
 In a test designed merely to prove that the translation of simple joins succeeded to generate the right query, the database did not return the correct number of rows. 
 
+```csharp
 from c in db.Customers
 from o in c.Orders
 from d in o.Details
 select d.ProductId
+```
 
 which executes a MySql query that looks like this:
 
+```sql
 SELECT d.ProductId
 FROM [Customers] AS c
 LEFT OUTER JOIN [Orders] AS o ON o.CustomerID = c.CustomerID
 LEFT OUTER JOIN [Order_Details] AS d ON d.OrderID = o.OrderID
+```
 
 I expected to get a number of rows corresponding to the total number of order-details in the database.  But I didn't.  I got a whole lot less.  So I started experimenting with different forms of the query.  If I selected o.OrderID instead of d.ProductID, I got a different number from either of the other two. If I selected c.CustomerID, again an entirely different number of rows.  It was only when I chose to select the entire order-detail object did I get the number of rows I was expecting.
 
@@ -83,21 +87,25 @@ While MySQL has a huge library of function, SQLite has a tiny one; many .Net API
 
 In addition one of SQLite's big drawbacks is its lack of a rich type system.  SQLite's developers claim this to be a feature, and it may afford great flexibility, but is often a death sentence for LINQ queries, which are all strongly typed.  SQLite does have types, but only a few of them, like number, text and binary.  Problems arise when you try to use DateTime's, as they are not really their own type in SQLite, but a text layout.  For example, if you were trying to find all orders for a customer that happen in January, you might write this query.
 
+```csharp
 from o in db.Orders
 where o.CustomerID == cust && o.OrderDate.Month = 1
 select o
+```
 
 this would produce this query.
 
+```sql
 SELECT o.OrderID, o.OrderDate
 FROM Orders AS o
 WHERE o.CustomerID = @cust AND STRFTIME('%m', o.OrderDate) = 1
+```
 
 The date function to extract the month out of the OrderDate column is really a text formatting function that extracts the month portion of the date-time text layout, which in this case is the text '01', since the date-time format is always padded to a specific width.  When this is compared against the number (1), another subtle difference crops up. For all other SQL's I've come across, text is considered the weakest form of type, so when two types are compared for equality text is always converted to the other form.  Yet, in SQLite, the opposite it true (which truthfully is more like C# and Java).  So when the two types are compared they are found incompatible, because the number (1) is turned into the text '1' and that is not the same as the text '01'. Adding insult to injury, there appears to be no type conversion functions at all, so I can't even work around the problem by injecting a conversion. My ignorance of SQLite may just be showing here, or a lack of sufficient documentation.
 
 So my recommendation if you are using SQLite, to stay away from most API functions in your where clauses and such. API calls in the projection are okay, because these get executed on the client.
 
-Transactions
+## Transactions
 
 
 I'm surprised no one's called me on this before. The DbQueryProvider and its ilk have been suspiciously lacking in support for transactions. The providers work, LINQ queries are converted into ADO Commands and executed, yet those ADO Command objects are never assigned an ADO transaction, even if you started one explicitly. 
@@ -106,69 +114,54 @@ Of course, the official word from Microsoft is to stop using the ADO transaction
 
 Unfortunately, TransactionScope is mired with many problems and is not supported by all ADO providers so ADO transactions are still a necessity.  You can now use ADO transactions with query providers in a manner similar to LINQ to SQL.
 
+```csharp
 provider.Transaction = provider.Connection.BeginTransaction();
+
 
 // use the provider here to execute queries and updates, etc.
 
 provider.Transaction.Commit();
 provider.Transaction = null;
+```
 
 The provider will use whatever transaction object you give it when it creates new ADO command objects.
 
 
-Entity Providers
+## Entity Providers
 
 
 I decided to formalize the pairing of query providers with a Table object that enables updates and other facilities.  The definition of an entity provider is now defined by these three interfaces.
 
-
+```csharp
 public interface IEntityProvider : IQueryProvider
-
 {
-
     IEntityTable<T> GetTable<T>(string tableId);
-
     IEntityTable GetTable(Type type, string tableId);
-
 }
 
 public interface IEntityTable : IQueryable, IUpdatable
-
 {
-
     new IEntityProvider Provider { get; }
 
     string TableId { get; }
-
     object GetById(object id);
-
     int Insert(object instance);
-
     int Update(object instance);
-
     int Delete(object instance);
-
     int InsertOrUpdate(object instance);
-
 }
 
 
 public interface IEntityTable<T> : IQueryable<T>, IEntityTable, IUpdatable<T>
-
 {
-
     new T GetById(object id);
 
     int Insert(T instance);
-
     int Update(T instance);
-
     int Delete(T instance);
-
     int InsertOrUpdate(T instance);
-
 }
-
+```
 
 
 You can now always get to a table directly from a provider.  The two concepts are coupled together.  An entity table also has explicit CRUD methods and implements IUpdatable, so no more separation between normal tables and updatable tables. In my mind this simplifies things quite a bit. 
@@ -176,7 +169,7 @@ You can now always get to a table directly from a provider.  The two concepts ar
 Of course, this caused me to want to rename DbQueryProvider.  Ooops.  This will likely cause you some grief as any of your existing code that was using DbQueryProvider directly is now not going to compile.  The new name for this class is now DbEntityProvider. It might not matter so much now that there is a nifty IEntityProvider interface.
 
 
-Entity Sessions
+## Entity Sessions
 
 
 One thing missing from the Toolkit so far has been all of that context stuff that LINQ to SQL and LINQ to Entities have.  When you use LINQ to SQL you have a change tracking service that detects when your objects change, and sends the updates for you all at the same time when you call SubmitChanges. 
@@ -185,9 +178,8 @@ An entity session is all of this change-tracking, deferred updating stuff packag
 
 An entity session is defined below:
 
-
+```csharp
 public interface IEntitySession
-
 {
 
     IEntityProvider Provider { get; }
@@ -197,11 +189,9 @@ public interface IEntitySession
     ISessionTable GetTable(Type elementType, string tableId);
 
     void SubmitChanges();
-
 }
 
 public interface ISessionTable : IQueryable
-
 {
 
     IEntitySession Session { get; }
@@ -213,12 +203,9 @@ public interface ISessionTable : IQueryable
     void SetSubmitAction(object instance, SubmitAction action);
 
     SubmitAction GetSubmitAction(object instance);
-
 }
 
-
 public interface ISessionTable<T> : IQueryable<T>, ISessionTable
-
 {
 
     new IEntityTable<T> ProviderTable { get; }
@@ -228,107 +215,61 @@ public interface ISessionTable<T> : IQueryable<T>, ISessionTable
     void SetSubmitAction(T instance, SubmitAction action);
 
     SubmitAction GetSubmitAction(T instance);
-
 }
-
 
 public enum SubmitAction
-
 {
-
     None,
-
     Update,
-
     PossibleUpdate,
-
     Insert,
-
     InsertOrUpdate,
-
     Delete
-
 }
-
 
 public static class SessionTableExtensions
-
 {
-
     public static void InsertOnSubmit<T>(this ISessionTable<T> table, T instance)
-
     {
-
         table.SetSubmitAction(instance, SubmitAction.Insert);
-
     }
-
 
     public static void InsertOnSubmit(this ISessionTable table, object instance)
-
     {
-
         table.SetSubmitAction(instance, SubmitAction.Insert);
-
     }
-
 
     public static void InsertOrUpdateOnSubmit<T>(this ISessionTable<T> table, T instance)
-
     {
-
         table.SetSubmitAction(instance, SubmitAction.InsertOrUpdate);
-
     }
-
 
     public static void InsertOrUpdateOnSubmit(this ISessionTable table, object instance)
-
     {
-
         table.SetSubmitAction(instance, SubmitAction.InsertOrUpdate);
-
     }
-
 
     public static void UpdateOnSubmit<T>(this ISessionTable<T> table, T instance)
-
     {
-
         table.SetSubmitAction(instance, SubmitAction.Update);
-
     }
-
 
     public static void UpdateOnSubmit(this ISessionTable table, object instance)
-
     {
-
         table.SetSubmitAction(instance, SubmitAction.Update);
-
     }
-
 
     public static void DeleteOnSubmit<T>(this ISessionTable<T> table, T instance)
-
     {
-
         table.SetSubmitAction(instance, SubmitAction.Delete);
-
     }
-
 
     public static void DeleteOnSubmit(this ISessionTable table, object instance)
-
     {
-
         table.SetSubmitAction(instance, SubmitAction.Delete);
-
     }
-
 }
-
-
+```
 
 As you can see, an entity session has tables, just like a provider.  Yet, those tables are not directly updatable.  Instead you can assign entity instances submit actions. These are the actions that take place later when you call SubmitChanges.  There are a bunch of extension methods defined to add the LINQ to SQL like InsertOnSubmit() methods to the interface.  These simply call the SetSubmitAction() method for you.
 
@@ -339,27 +280,29 @@ There is one current implementation of an entity session in the Toolkit called (
 You are also not locked into the session's behavior.  At any time you can interact with the underlying provider instead for retrieving entities without passing through the identity cache or being changed tracked.  You can even get to the provider's table directly off a session table.
 
 
-Provider Factory
+## Provider Factory
 
 
 Now with so many providers and one single way to write queries you'd think it would be easy to switch between them.  In reality it is not. You have to pick the provider you want, reference its library (IQToolkit.Data.XXX), reference its corresponding ADO library (System.Data.XXX), create the ADO connection, the mapping object and construct the provider.
 
+```csharp
 var connection = new SqlConnection("...");
 var mapping = new AttributeMapping(typeof(Northwind));
 var provider = new SqlProvider(connection, mapping, QueryPolicy.Default, null);
 var db = new Northwind(provider);
+```
 
 You can hide this all inside your database context class (or whatever you want to call yours), so you only have to write it once, but then your context class is tied to a specific provider.  Instead, you could wrap this code up into a factory method of your own devising, but then calls to the factory would be spread throughout your codebase.  There no good way to defer all this work to some configuration setting. Until now.
 
 Introducing the new factory methods built into DbEntityProvider.
 
+```csharp
 public static DbEntityProvider FromApplicationSettings();
-
 
 public static DbEntityProvider From(string filename, string mappingId);
 
 public static DbEntityProvider From(string provider, string connectionString, string mappingId);
-
+```
 
 
 These methods allow you to get up and running with only knowing a few bits of information.  You don't have to hard link you application to any particular provider.
@@ -374,12 +317,14 @@ The mappingId can either refer to the name of a context class (like Northwind) t
 
 So now you can write code like this to get your provider.
 
+```csharp
 var db = new Northwind(DbEntityProvider.From(somedbfile, somemapfile));
+```
 
-Or better yet, you can use the FromApplicationSettings() method in the constructor of your context and still be configurable at runtime.
+Or better yet, you can use the ```FromApplicationSettings()``` method in the constructor of your context and still be configurable at runtime.
 
 
-Madness
+## Madness
 
 
 Of course, it wouldn't be a new toolkit release without some additional crazy changes.  One significant change is namespaces again. This time its not going to conflict with your code too much.  Most of the classes that where in IQToolkit.Data have been demoted into the namespace IQToolkit.Data.Common.  This includes most all classes that are implementation detail or base classes.  Mapping attributes and the like are now in IQToolkit.Data.Mapping.  This makes the namespace clean and obvious when you start looking for things via intellisense. 
